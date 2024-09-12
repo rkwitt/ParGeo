@@ -8,6 +8,20 @@ target_link_libraries(graphGenerator
   emstLib
   spatialGraphLib)
 
+set(EMST_INCLUDE_DIRECTORIES 
+  /usr/include/eigen3
+  /scratch1/rkwitt/spanning_trees_code/external/cnpy-install/include)
+add_executable(emstLength emstLength.cpp)
+target_include_directories(emstLength PRIVATE ${EMST_INCLUDE_DIRECTORIES})
+target_link_libraries(emstLength
+  pargeoLib
+  delaunay2dLib
+  emstLib
+  spatialGraphLib
+  boost_program_options
+  sqlite3 
+  /scratch1/rkwitt/spanning_trees_code/external/cnpy-install/lib/libcnpy.so)
+
 add_executable(kNearestNeighbor kNearestNeighbor.cpp)
 target_link_libraries(kNearestNeighbor pargeoLib)
 

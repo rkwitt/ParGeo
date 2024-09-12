@@ -113,3 +113,5 @@ template sequence<wghEdge> pargeo::euclideanMst<4>(sequence<point<4>> &);
 template sequence<wghEdge> pargeo::euclideanMst<5>(sequence<point<5>> &);
 template sequence<wghEdge> pargeo::euclideanMst<6>(sequence<point<6>> &);
 template sequence<wghEdge> pargeo::euclideanMst<7>(sequence<point<7>> &);
+template sequence<wghEdge> pargeo::euclideanMst<8>(sequence<point<8>> &);
+template sequence<wghEdge> pargeo::euclideanMst<9>(sequence<point<9>> &);
