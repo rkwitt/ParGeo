@@ -291,11 +291,11 @@ int main(int argc, char* argv[])
   try {
     std::tuple<int, double> result = dispatch(dim, numPoints, shape, inputFile);
     
-    int num = std::get<0>(result);
+    numPoints = std::get<0>(result);
     double mst_length = std::get<1>(result);
     double mst_length_normalized = mst_length / sqrt((double)num) / sqrt(volume);
     std::cout << numPoints << " | MST length: " << mst_length << " | " << "(Normalized) MST length: " << mst_length_normalized << std::endl;
-    writeToDatabase(dbFile, num, mst_length, mst_length_normalized);
+    writeToDatabase(dbFile, numPoints, mst_length, mst_length_normalized);
 
   } catch (std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
