@@ -293,7 +293,7 @@ int main(int argc, char* argv[])
     
     numPoints = std::get<0>(result);
     double mst_length = std::get<1>(result);
-    double mst_length_normalized = mst_length / sqrt((double)num) / sqrt(volume);
+    double mst_length_normalized = mst_length / sqrt((double)numPoints) / sqrt(volume);
     std::cout << numPoints << " | MST length: " << mst_length << " | " << "(Normalized) MST length: " << mst_length_normalized << std::endl;
     writeToDatabase(dbFile, numPoints, mst_length, mst_length_normalized);
 
