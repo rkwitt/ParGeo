@@ -156,7 +156,7 @@ void fill_from_uniform_in_unitball(T &pts, int num, unsigned seed) {
 }
 
 
-template<int dim>
+template<int dim, int p>
 std::tuple<int, double> callEuclideanMst(int num, std::string shape) {
   double emst_len = 0.0;
   parlay::sequence<pargeo::point<dim>> pts(num);
@@ -174,7 +174,8 @@ std::tuple<int, double> callEuclideanMst(int num, std::string shape) {
   double dist = 0.0;
   for (auto e: I) {
     dist = S[e.u].dist(S[e.v]);
-    double y = dist - compensation;
+    double pdist = pow(dist,p); // uses that power weighted spanning tree has the same edges
+    double y = pdist - compensation;
     double t = sum + y;
     compensation = (t - sum) - y;
     sum = t;
@@ -183,7 +184,7 @@ std::tuple<int, double> callEuclideanMst(int num, std::string shape) {
 }
 
 
-template<int dim>
+template<int dim, int p>
 std::tuple<int, double> callEuclideanMstFromFile(std::string inputFile) {
   int rows;
   int cols;
@@ -211,7 +212,8 @@ std::tuple<int, double> callEuclideanMstFromFile(std::string inputFile) {
   double dist = 0.0;
   for (auto e: I) {
     dist = S[e.u].dist(S[e.v]);
-    double y = dist - compensation;
+    double pdist = pow(dist,p); // uses that power weighted spanning tree has the same edges
+    double y = pdist - compensation;
     double t = sum + y;
     compensation = (t - sum) - y;
     sum = t;
@@ -220,38 +222,50 @@ std::tuple<int, double> callEuclideanMstFromFile(std::string inputFile) {
 }
 
 
-template <int dim>
+template <int dim, int p>
 std::tuple<int, double> dispatchEuclideanMst(int numPoints, const std::string& shape, const std::string& inputFile) {
     std::tuple<int, double> result;
     if (!inputFile.empty()) {
-        result = callEuclideanMstFromFile<dim>(inputFile);
+        result = callEuclideanMstFromFile<dim,p>(inputFile);
     } else {
-        result = callEuclideanMst<dim>(numPoints, shape);
+        result = callEuclideanMst<dim,p>(numPoints, shape);
     }
     return result;
 }
 
 
-std::tuple<int, double> 
-dispatch(int dim, int numPoints, const std::string& shape, const std::string& inputFile) {
-  
-  if (inputFile.empty()) {
-    if (shape.empty()) throw std::runtime_error("No shape given!");
-    if (numPoints<0) throw std::runtime_error("Number of points not >0!");
-    if (dim<2 || dim>9) throw std::runtime_error("Dimension needs to be in {2,...9}");
-  }
+using DispatchFn = std::tuple<int, double>(*)(int, const std::string&, const std::string&);
 
-  switch (dim) {
-      case 2: return dispatchEuclideanMst<2>(numPoints, shape, inputFile);
-      case 3: return dispatchEuclideanMst<3>(numPoints, shape, inputFile);
-      case 4: return dispatchEuclideanMst<4>(numPoints, shape, inputFile);
-      case 5: return dispatchEuclideanMst<5>(numPoints, shape, inputFile);
-      case 6: return dispatchEuclideanMst<6>(numPoints, shape, inputFile);
-      case 7: return dispatchEuclideanMst<7>(numPoints, shape, inputFile);
-      case 8: return dispatchEuclideanMst<8>(numPoints, shape, inputFile);
-      case 9: return dispatchEuclideanMst<9>(numPoints, shape, inputFile);
-      default: throw std::invalid_argument("Unsupported dimension");
-  }
+template<int dim, int p>
+std::tuple<int, double> dispatchHelper(int numPoints, const std::string& shape, const std::string& inputFile) {
+    return dispatchEuclideanMst<dim, p>(numPoints, shape, inputFile);
+}
+
+std::tuple<int, double> dispatch(int dim, int p, int numPoints, const std::string& shape, const std::string& inputFile) {
+    if (inputFile.empty()) {
+        if (shape.empty()) throw std::runtime_error("No shape given!");
+        if (numPoints < 0) throw std::runtime_error("Number of points not >0!");
+        if (dim < 2 || dim > 9) throw std::runtime_error("Dimension needs to be in {2,...9}");
+    }
+
+    // Table of function pointers for p = 1 to 5 and dim = 2 to 9
+    static const DispatchFn dispatchTable[8][5] = {
+        {&dispatchHelper<2, 1>, &dispatchHelper<2, 2>, &dispatchHelper<2, 3>, &dispatchHelper<2, 4>, &dispatchHelper<2, 5>},
+        {&dispatchHelper<3, 1>, &dispatchHelper<3, 2>, &dispatchHelper<3, 3>, &dispatchHelper<3, 4>, &dispatchHelper<3, 5>},
+        {&dispatchHelper<4, 1>, &dispatchHelper<4, 2>, &dispatchHelper<4, 3>, &dispatchHelper<4, 4>, &dispatchHelper<4, 5>},
+        {&dispatchHelper<5, 1>, &dispatchHelper<5, 2>, &dispatchHelper<5, 3>, &dispatchHelper<5, 4>, &dispatchHelper<5, 5>},
+        {&dispatchHelper<6, 1>, &dispatchHelper<6, 2>, &dispatchHelper<6, 3>, &dispatchHelper<6, 4>, &dispatchHelper<6, 5>},
+        {&dispatchHelper<7, 1>, &dispatchHelper<7, 2>, &dispatchHelper<7, 3>, &dispatchHelper<7, 4>, &dispatchHelper<7, 5>},
+        {&dispatchHelper<8, 1>, &dispatchHelper<8, 2>, &dispatchHelper<8, 3>, &dispatchHelper<8, 4>, &dispatchHelper<8, 5>},
+        {&dispatchHelper<9, 1>, &dispatchHelper<9, 2>, &dispatchHelper<9, 3>, &dispatchHelper<9, 4>, &dispatchHelper<9, 5>}
+    };
+
+    // Ensure p and dim are within valid ranges
+    if (dim < 2 || dim > 9 || p < 1 || p > 5) {
+        throw std::invalid_argument("Unsupported dimension or p value");
+    }
+
+    return dispatchTable[dim - 2][p - 1](numPoints, shape, inputFile);
 }
 
 
@@ -263,12 +277,16 @@ int main(int argc, char* argv[])
     double volume = 1.0;
     int numPoints = -1;        
     int dim = -1;
+    int intdim = -1;
+    int p = 1;
 
     try {
         po::options_description desc("Options");
         desc.add_options()
             ("help,h", "produce help message")
             ("dim,d", po::value<int>(&dim)->required(), "dimensionality of input vectors (R^d).")
+            ("intDim,d", po::value<int>(&intdim), "intrinsic_dimensionality of the shape")
+            ("p,p", po::value<int>(&p), "power of edge lengths")
             ("numPoints,n", po::value<int>(&numPoints), "Number of points to sample.")
             ("volume,v", po::value<double>(&volume)->required(), "Volume for normalization.")
             ("shape,f", po::value<std::string>(&shape), "Sample from cube or ball.")
@@ -289,11 +307,13 @@ int main(int argc, char* argv[])
     }
 
   try {
-    std::tuple<int, double> result = dispatch(dim, numPoints, shape, inputFile);
+    std::tuple<int, double> result = dispatch(dim, p, numPoints, shape, inputFile);
     
     numPoints = std::get<0>(result);
     double mst_length = std::get<1>(result);
-    double mst_length_normalized = mst_length / sqrt((double)numPoints) / sqrt(volume);
+    if (intdim == -1) intdim = dim;
+    double normalization = pow((double)numPoints,1.-1.*p/intdim) * pow(volume,1.*p/intdim);
+    double mst_length_normalized = mst_length /normalization;
     std::cout << numPoints << " | MST length: " << mst_length << " | " << "(Normalized) MST length: " << mst_length_normalized << std::endl;
     writeToDatabase(dbFile, numPoints, mst_length, mst_length_normalized);
 
