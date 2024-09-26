@@ -245,11 +245,11 @@ std::tuple<int, double> dispatch(int dim, int p, int numPoints, const std::strin
     if (inputFile.empty()) {
         if (shape.empty()) throw std::runtime_error("No shape given!");
         if (numPoints < 0) throw std::runtime_error("Number of points not >0!");
-        if (dim < 2 || dim > 9) throw std::runtime_error("Dimension needs to be in {2,...9}");
+        if (dim < 2 || dim > 16) throw std::runtime_error("Dimension needs to be in {2,...,16}");
     }
 
-    // Table of function pointers for p = 1 to 5 and dim = 2 to 9
-    static const DispatchFn dispatchTable[8][5] = {
+    // Table of function pointers for p = 1 to 5 and dim = 2 to 16
+    static const DispatchFn dispatchTable[15][5] = {
         {&dispatchHelper<2, 1>, &dispatchHelper<2, 2>, &dispatchHelper<2, 3>, &dispatchHelper<2, 4>, &dispatchHelper<2, 5>},
         {&dispatchHelper<3, 1>, &dispatchHelper<3, 2>, &dispatchHelper<3, 3>, &dispatchHelper<3, 4>, &dispatchHelper<3, 5>},
         {&dispatchHelper<4, 1>, &dispatchHelper<4, 2>, &dispatchHelper<4, 3>, &dispatchHelper<4, 4>, &dispatchHelper<4, 5>},
@@ -257,11 +257,18 @@ std::tuple<int, double> dispatch(int dim, int p, int numPoints, const std::strin
         {&dispatchHelper<6, 1>, &dispatchHelper<6, 2>, &dispatchHelper<6, 3>, &dispatchHelper<6, 4>, &dispatchHelper<6, 5>},
         {&dispatchHelper<7, 1>, &dispatchHelper<7, 2>, &dispatchHelper<7, 3>, &dispatchHelper<7, 4>, &dispatchHelper<7, 5>},
         {&dispatchHelper<8, 1>, &dispatchHelper<8, 2>, &dispatchHelper<8, 3>, &dispatchHelper<8, 4>, &dispatchHelper<8, 5>},
-        {&dispatchHelper<9, 1>, &dispatchHelper<9, 2>, &dispatchHelper<9, 3>, &dispatchHelper<9, 4>, &dispatchHelper<9, 5>}
+        {&dispatchHelper<9, 1>, &dispatchHelper<9, 2>, &dispatchHelper<9, 3>, &dispatchHelper<9, 4>, &dispatchHelper<9, 5>},
+        {&dispatchHelper<10, 1>, &dispatchHelper<10, 2>, &dispatchHelper<10, 3>, &dispatchHelper<10, 4>, &dispatchHelper<10, 5>},
+        {&dispatchHelper<11, 1>, &dispatchHelper<11, 2>, &dispatchHelper<11, 3>, &dispatchHelper<11, 4>, &dispatchHelper<11, 5>},
+        {&dispatchHelper<12, 1>, &dispatchHelper<12, 2>, &dispatchHelper<12, 3>, &dispatchHelper<12, 4>, &dispatchHelper<12, 5>},
+        {&dispatchHelper<13, 1>, &dispatchHelper<13, 2>, &dispatchHelper<13, 3>, &dispatchHelper<13, 4>, &dispatchHelper<13, 5>},
+        {&dispatchHelper<14, 1>, &dispatchHelper<14, 2>, &dispatchHelper<14, 3>, &dispatchHelper<14, 4>, &dispatchHelper<14, 5>},
+        {&dispatchHelper<15, 1>, &dispatchHelper<15, 2>, &dispatchHelper<15, 3>, &dispatchHelper<15, 4>, &dispatchHelper<15, 5>},
+        {&dispatchHelper<16, 1>, &dispatchHelper<16, 2>, &dispatchHelper<16, 3>, &dispatchHelper<16, 4>, &dispatchHelper<16, 5>},
     };
 
     // Ensure p and dim are within valid ranges
-    if (dim < 2 || dim > 9 || p < 1 || p > 5) {
+    if (dim < 2 || dim > 16 || p < 1 || p > 5) {
         throw std::invalid_argument("Unsupported dimension or p value");
     }
 
