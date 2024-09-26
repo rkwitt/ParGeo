@@ -26,14 +26,10 @@ parlay::sequence<pargeo::wghEdge> pargeo::euclideanMst(parlay::sequence<pargeo::
     throw std::runtime_error("need more than 2 points");
   }
 
-  // timer t0;
-  // t0.start();
   bool paraTree = true;
 
   //nodeT* tree = buildKdt<dim, point<dim>>(S, true, true);
   nodeT* tree = kdTree::build<dim, point<dim>>(S, true, 1);
-
-  // cout << "build-tree-time = " << t0.get_next() << endl;
 
   floatT rhoLo = -0.1;
   floatT beta = 2;
@@ -44,20 +40,10 @@ parlay::sequence<pargeo::wghEdge> pargeo::euclideanMst(parlay::sequence<pargeo::
   floatT markTime = 0;
   edgeUnionFind<long> UF(S.size());
 
-  // t0.stop();
-
   while (UF.numEdge() < S.size() - 1) {
-
-    // t0.start();
-
     floatT rhoHi;
-    auto bccps = filterWspdParallel<nodeT>(beta, rhoLo, rhoHi, tree, &UF);
-
-    // wspdTime += t0.get_next();
-
-    // cout << "---" << endl;
-    // cout << " beta = " << beta << endl;
-    // cout << " rho = " << rhoLo << " -- " << rhoHi << endl;
+    //auto bccps = filterWspdParallel<nodeT>(beta, rhoLo, rhoHi, tree, &UF);
+    auto bccps = filterWspdSerial<nodeT>(beta, rhoLo, rhoHi, tree, &UF);
 
     numEdges += bccps.size();
 
@@ -66,8 +52,6 @@ parlay::sequence<pargeo::wghEdge> pargeo::euclideanMst(parlay::sequence<pargeo::
       rhoLo = rhoHi;
       continue;}
 
-    // cout << " edges = " << bccps.size() << endl;
-
     struct wEdge {
       size_t u,v;
       floatT weight;
@@ -75,37 +59,26 @@ parlay::sequence<pargeo::wghEdge> pargeo::euclideanMst(parlay::sequence<pargeo::
 
     auto base = S.data();
     sequence<wEdge> edges = tabulate(bccps.size(), [&](size_t i) {
-	auto bcp = bccps[i];
-	wEdge e;
-	e.u = get<0>(bcp) - base;
-	e.v = get<1>(bcp) - base;
-	e.weight = get<2>(bcp);
-	return e;
-      });
+      auto bcp = bccps[i];
+      wEdge e;
+      e.u = get<0>(bcp) - base;
+      e.v = get<1>(bcp) - base;
+      e.weight = get<2>(bcp);
+      return e;
+    });
 
     batchKruskal(edges, S.size(), UF);
-    // cout << " mst-edges = " << UF.numEdge() << endl;
-    // kruskalTime += t0.get_next();
-
+    
     mark<nodeT, pointT, edgeUnionFind<long>>(tree, &UF, S.data());
-    // markTime += t0.stop();
-
+    
     beta *= 2;
     rhoLo = rhoHi;
   }
 
-  // floatT sum = 0;
-  // auto E = UF.getEdge();
-  // for (auto e: E)
-  //   sum += S[e.u].dist(S[e.v]);
-  // cout << "edge-sum = " << sum << endl;
-
-  // cout << "wspd-time = " << wspdTime << endl;
-  // cout << "kruskal-time = " << kruskalTime << endl;
-  // cout << "mark-time = " << markTime << endl;
   pargeo::kdTree::del(tree);
   return UF.getEdge();
 }
+
 
 template sequence<wghEdge> pargeo::euclideanMst<2>(sequence<point<2>> &);
 template sequence<wghEdge> pargeo::euclideanMst<3>(sequence<point<3>> &);

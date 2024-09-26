@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <iostream>
 #include <atomic>
 #include <tuple>
 #include <limits>
@@ -198,22 +199,24 @@ struct wspGetParallel {
   wspGetParallel(floatT betaa, floatT rhoLoo, floatT rhoHii, nodeT *treee, UF *uff) :
     beta(betaa), rhoLo(rhoLoo), rhoHi(rhoHii), tree(treee), uf(uff) {
     size_t procs = parlay::num_workers();
+
     out = (bufT**) malloc(sizeof(bufT*)*procs);
     parlay::parallel_for(0, procs, [&](size_t p) {
-			     out[p] = new bufT(tree->size()/procs);
-			   });
+      out[p] = new bufT(tree->size()/procs);
+    });
   }
 
   ~wspGetParallel() {
     size_t procs = parlay::num_workers();
     parlay::parallel_for(0, procs, [&](size_t p) {
-			     delete out[p];});
-    free(out);
+      delete out[p];});
+      free(out);
   }
 
   parlay::sequence<bcpT> collect() {
     int procs = parlay::num_workers();
-      return parBufCollect<bcpT>(out, procs);
+    std::cout << "collecting" << std::endl;
+    return parBufCollect<bcpT>(out, procs);
   }
 
   void run(nodeT *u, nodeT *v) {
@@ -259,13 +262,10 @@ filterWspdParallel(double t_beta,
   using bcpT = std::tuple<objT*, objT*, floatT>;
 
   auto myRho = rhoUpdateParallel<nodeT, UF>(t_beta, t_mst);
-
   pargeo::kdTree::computeWspdParallel<nodeT, rhoUpdateParallel<nodeT, UF>>(t_kdTree, &myRho);
-
   auto mySplitter = wspGetParallel<nodeT, UF>(t_beta, t_rho_lo, myRho.getRho(), t_kdTree, t_mst);
-
   pargeo::kdTree::computeWspdParallel<nodeT, wspGetParallel<nodeT, UF>>(t_kdTree, &mySplitter);
-
+  
   t_rho_hi = myRho.getRho();
   return mySplitter.collect();
 }

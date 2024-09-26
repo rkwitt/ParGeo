@@ -21,6 +21,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+#include <iostream>
 #pragma once
 
 namespace pargeo {
@@ -58,8 +59,8 @@ namespace pargeo {
     intT size() {
       intT tmp = 0;
       for(intT i = 0; i < m_parentUsed-1; ++ i) {
-	//cout << "size: parent " << i << ": " << m_parentSizes[i] << endl;
-	tmp += m_parentSizes[i];
+        //cout << "size: parent " << i << ": " << m_parentSizes[i] << endl;
+        tmp += m_parentSizes[i];
       }
       //cout << "size: last parent " << ": " << m_count << endl;
       tmp += m_count;
@@ -71,8 +72,8 @@ namespace pargeo {
       intT *parentSizes1 = (intT *) malloc(sizeof(intT) * (m_parentTotal * 2+1));
 
       for(intT i = 0; i < m_parentUsed; ++ i) {
-	parent1[i] = m_parent[i];
-	parentSizes1[i] = m_parentSizes[i];
+        parent1[i] = m_parent[i];
+        parentSizes1[i] = m_parentSizes[i];
       }
 
       free(m_parent);
@@ -90,21 +91,21 @@ namespace pargeo {
 
     T* increment() {
       if (m_count + 1 > m_currentSize) {
-	// book keeping for current arr
-	finalize();
+        // book keeping for current arr
+        finalize();
 
-	// allocate new arr
-	T *arr1 = (T *) malloc(sizeof(T) * m_currentSize * 2);
+        // allocate new arr
+        T *arr1 = (T *) malloc(sizeof(T) * m_currentSize * 2);
 
-	if (m_parentUsed < m_parentTotal) {
-	  m_parent[m_parentUsed++] = arr1;
-	} else {
-	  m_parent[incrementParent()] = arr1;
-	}
+        if (m_parentUsed < m_parentTotal) {
+          m_parent[m_parentUsed++] = arr1;
+        } else {
+          m_parent[incrementParent()] = arr1;
+        }
 
-	m_arr = arr1;
-	m_count = 0;
-	m_currentSize *= 2;
+        m_arr = arr1;
+        m_count = 0;
+        m_currentSize *= 2;
       }
       return m_arr + (m_count++);
     }

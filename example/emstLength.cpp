@@ -203,10 +203,12 @@ std::tuple<int, double> callEuclideanMstFromFile(std::string inputFile) {
         pts[i].x[k] = X(i,k);
     }
   }
-  
+
+
   auto I = euclideanMst<dim>(pts);
   auto S = pts.data();
-  
+
+
   double sum = 0.0;
   double compensation = 0.0;
   double dist = 0.0;
@@ -225,6 +227,7 @@ std::tuple<int, double> callEuclideanMstFromFile(std::string inputFile) {
 template <int dim, int p>
 std::tuple<int, double> dispatchEuclideanMst(int numPoints, const std::string& shape, const std::string& inputFile) {
     std::tuple<int, double> result;
+
     if (!inputFile.empty()) {
         result = callEuclideanMstFromFile<dim,p>(inputFile);
     } else {
@@ -271,7 +274,6 @@ std::tuple<int, double> dispatch(int dim, int p, int numPoints, const std::strin
     if (dim < 2 || dim > 16 || p < 1 || p > 5) {
         throw std::invalid_argument("Unsupported dimension or p value");
     }
-
     return dispatchTable[dim - 2][p - 1](numPoints, shape, inputFile);
 }
 
@@ -321,7 +323,7 @@ int main(int argc, char* argv[])
     if (intdim == -1) intdim = dim;
     double normalization = pow((double)numPoints,1.-1.*p/intdim) * pow(volume,1.*p/intdim);
     double mst_length_normalized = mst_length /normalization;
-    std::cout << numPoints << " | MST length: " << mst_length << " | " << "(Normalized) MST length: " << mst_length_normalized << std::endl;
+    std::cout << inputFile << " | " << numPoints << " | MST length: " << mst_length << " | " << "(Normalized) MST length: " << mst_length_normalized << std::endl;
     writeToDatabase(dbFile, numPoints, mst_length, mst_length_normalized);
 
   } catch (std::exception& e) {
