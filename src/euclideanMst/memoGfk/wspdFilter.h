@@ -215,7 +215,6 @@ struct wspGetParallel {
 
   parlay::sequence<bcpT> collect() {
     int procs = parlay::num_workers();
-    std::cout << "collecting" << std::endl;
     return parBufCollect<bcpT>(out, procs);
   }
 

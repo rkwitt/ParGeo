@@ -42,8 +42,8 @@ parlay::sequence<pargeo::wghEdge> pargeo::euclideanMst(parlay::sequence<pargeo::
 
   while (UF.numEdge() < S.size() - 1) {
     floatT rhoHi;
-    //auto bccps = filterWspdParallel<nodeT>(beta, rhoLo, rhoHi, tree, &UF);
-    auto bccps = filterWspdSerial<nodeT>(beta, rhoLo, rhoHi, tree, &UF);
+    auto bccps = filterWspdParallel<nodeT>(beta, rhoLo, rhoHi, tree, &UF);
+    //auto bccps = filterWspdSerial<nodeT>(beta, rhoLo, rhoHi, tree, &UF);
 
     numEdges += bccps.size();
 
