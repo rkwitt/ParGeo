@@ -8,6 +8,7 @@ target_link_libraries(graphGenerator
   emstLib
   spatialGraphLib)
 
+find_package(fmt CONFIG REQUIRED)
 set(EMST_INCLUDE_DIRECTORIES 
   /usr/include/eigen3
   /scratch1/rkwitt/spanning_trees_code/external/cnpy-install/include)
@@ -19,7 +20,8 @@ target_link_libraries(emstLength
   emstLib
   spatialGraphLib
   boost_program_options
-  sqlite3 
+  fmt::fmt
+  sqlite3
   /scratch1/rkwitt/spanning_trees_code/external/cnpy-install/lib/libcnpy.so)
 
 add_executable(kNearestNeighbor kNearestNeighbor.cpp)
