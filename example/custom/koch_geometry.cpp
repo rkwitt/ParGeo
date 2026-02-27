@@ -1,5 +1,7 @@
 #include "euclideanMst/custom/koch_geometry.h"
 
+#include "cnpy.h" 
+
 /**
  * @brief Builds an edge table (structure-of-arrays) from a closed polygon.
  *

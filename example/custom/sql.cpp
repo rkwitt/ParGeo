@@ -1,6 +1,6 @@
 #include "euclideanMst/custom/sql.h"
 
-using namespace std;
+#include <iostream>
 
 // Function to execute an SQL command
 void execute_sql_statement(sqlite3* db, const std::string& sql) {

@@ -24,6 +24,7 @@
 #include "euclideanMst/custom/config.h"
 #include "euclideanMst/custom/tri_sampler.h"
 #include "euclideanMst/custom/samplers.h"
+
 #include "euclideanMst/euclideanMst.h"
 
 #include "parlay/parallel.h"
@@ -134,7 +135,7 @@ static inline double mst_p_sum(
         double d = S[e.u].dist(S[e.v]);
 
         if (cfg.use_sphere_geodesic) {
-            d = sphere_geodesic_from_chord_atan2(d);
+            d = emstExtension::custom::sphere_geodesic_from_chord_atan2(d);
         }
 
         const double pd = std::pow(d, p);
@@ -186,13 +187,6 @@ void fill_points_from_config(
         case Shape::Koch:
             if (cfg.koch_depth < 0) throw std::runtime_error("koch_depth must be >= 0");
             fill_from_koch_snowflake_2d_cdt(pts, cfg);
-            return;
-        case Shape::KochBand:
-            if (cfg.koch_depth <= 0) throw std::runtime_error("koch_depth must be > 0");
-            if (!(cfg.koch_band_thickness > 0.0)) throw std::runtime_error("koch_band_thickness must be > 0");
-            fill_from_koch_snowflake_band_2d(
-                pts, cfg.num_points, cfg.koch_depth, cfg.koch_band_thickness
-            );
             return;
         case Shape::Grassmann:
             if (cfg.gr_n <= 0) throw std::runtime_error("shape=grassmann requires gr_n > 0");
@@ -248,10 +242,10 @@ static std::tuple<int, double> dispatch(int dim, int p, const MstConfig& cfg) {
 
 int main(int argc, char* argv[]) 
 {
-    std::string inputFile;            // input file (binary numpy tensor)
-    std::string dbFile;               // SQLite3 database file
+    std::string input_file;           // input file (binary numpy tensor)
+    std::string db_file;              // SQLite3 database file
     std::string shape;                // sample from ball or cube
-    int numPoints = -1;               // is set on cmdline
+    int num_points = -1;              // is set on cmdline
     int dim = -1;                     // is set on cmdline
     int intdim = -1;                  // will be computed
     int p = 1;                        // default p
@@ -269,21 +263,17 @@ int main(int argc, char* argv[])
         desc.add_options()
             ("help", "produce help message")
             ("dim", po::value<int>(&dim)->required(), "dimensionality of input vectors (R^d).")
-            ("numPoints", po::value<int>(&numPoints)->required(), "Number of points to sample.")
+            ("num_points", po::value<int>(&num_points)->required(), "Number of points to sample.")
             ("shape", po::value<std::string>(&shape)->required(), "Sample from cube|ball|sphere|grassmann|koch.")
-            ("dbFile", po::value<std::string>(&dbFile)->required(), "SQLite3 database file.")
+            ("db_file", po::value<std::string>(&db_file)->required(), "SQLite3 database file.")
             ("p", po::value<int>(&p), "Power of edge lengths.")
-            ("inputFile", po::value<std::string>(&inputFile), "Numpy matrix input file.")
+            ("input_file", po::value<std::string>(&input_file), "Numpy matrix input file.")
             ("gr_n", po::value<int>(&gr_n), "Grassmann ambient dimension n (R^n).")
             ("gr_k", po::value<int>(&gr_k), "Grassmann subspace dimension k.")
-            ("koch_depth", po::value<int>(&koch_depth)->default_value(5),
-                "Recursion depth for Koch snowflake (only if shape=koch or shape=kochband).")
-            ("use_sphere_geodesic", po::bool_switch(&use_sphere_geodesic)->default_value(false),
-                "If set and --shape sphere, convert Euclidean chord lengths to spherical geodesic lengths when summing MST.")
-            ("use_triangulation_file", po::bool_switch(&use_triangulation_file)->default_value(false),
-                "If set, cache/reuse the Koch CDT-derived triangle sampler from disk.")
-            ("triangulation_file", po::value<std::string>(&triangulation_file)->default_value(""),
-                "Path to triangulation cache file (binary). If empty, a default path is used.");
+            ("use_sphere_geodesic", po::bool_switch(&use_sphere_geodesic)->default_value(false), "Convert dist. to chord length.")
+            ("koch_depth", po::value<int>(&koch_depth)->default_value(5), "Recursion depth for Koch snowflake.")
+            ("use_triangulation_file", po::bool_switch(&use_triangulation_file)->default_value(false), "Write and use triangulation file.")
+            ("triangulation_file", po::value<std::string>(&triangulation_file)->default_value(""), "Path to triangulation file.");
 
         po::variables_map vm;
         po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -302,14 +292,13 @@ int main(int argc, char* argv[])
 
     // MST configuration struct to pass to dispatch
     MstConfig cfg;
-    cfg.num_points = numPoints;
-    cfg.input_file = inputFile;
+    cfg.num_points = num_points;
+    cfg.input_file = input_file;
     cfg.shape = parse_shape(shape);
     cfg.gr_n = gr_n;
     cfg.gr_k = gr_k;
     cfg.use_sphere_geodesic = use_sphere_geodesic;
     cfg.koch_depth = koch_depth;
-    cfg.koch_band_thickness = 50e-2; // currently hardcoded, could be made a cmdline arg
     cfg.use_triangulation_file = use_triangulation_file;
     cfg.triangulation_file = triangulation_file;
 
@@ -317,7 +306,7 @@ int main(int argc, char* argv[])
         // Dispatch MST computation
         std::tuple<int, double> result = dispatch(dim, p, cfg);
 
-        numPoints = std::get<0>(result);
+        num_points = std::get<0>(result);
         double mst_length = std::get<1>(result);
 
         // Compute volume and intrinsic dimension for normalization based on shape.
@@ -328,7 +317,7 @@ int main(int argc, char* argv[])
             intdim = cfg.gr_k * (cfg.gr_n - cfg.gr_k);
         } else if (cfg.shape == Shape::Sphere) {
             if (dim < 2) throw std::runtime_error("Sphere requires dim >= 2");
-            if (!std::isfinite(volume)) volume = sphere_surface_area(dim - 1);
+            if (!std::isfinite(volume)) volume = emstExtension::custom::sphere_surface_area(dim - 1);
             intdim = dim - 1;
         } else if (cfg.shape == Shape::Ball) {
             if (!std::isfinite(volume)) volume = unit_ball_volume(dim);
@@ -339,28 +328,19 @@ int main(int argc, char* argv[])
             auto poly = koch_polygon(cfg.koch_depth);
             volume = polygon_area(poly);
             intdim = 2;
-        } else if (cfg.shape == Shape::KochBand) {
-            if (dim != 2) throw std::runtime_error("--shape kochband requires --dim 2");
-            if (cfg.koch_depth < 0) throw std::runtime_error("--koch_depth must be >= 0");
-            auto inner = koch_polygon(cfg.koch_depth);
-            const Vec2 c = polygon_centroid_area(inner);
-            const double s = 1.0 + cfg.koch_band_thickness;
-            auto outer = scale_polygon_about(inner, c, s);
-            volume = polygon_area(outer) - polygon_area(inner);
-            intdim = 2;
         } else if (cfg.shape == Shape::Cube) {
             if (!std::isfinite(volume)) volume = 1.0;
             intdim = dim;
         }
         
-        double mst_length_normalized = stable_normalized_mst(mst_length, numPoints, p, intdim, volume);
+        double mst_length_normalized = stable_normalized_mst(mst_length, num_points, p, intdim, volume);
         fmt::print(
             "| n={:>8d} | volume={:>20.16f} | dim={:>2d} | intdim={:>2d} | L_n={:>22.12f} | L_n (norm)={:>22.16f}\n",
-            numPoints, volume, dim, intdim, mst_length, 
+            num_points, volume, dim, intdim, mst_length, 
             fmt::styled(mst_length_normalized,fmt::fg(fmt::color::green) | fmt::emphasis::bold)
         );
 
-        write_to_database(dbFile, numPoints, mst_length, mst_length_normalized);
+        write_to_database(db_file, num_points, mst_length, mst_length_normalized);
 
     } catch (std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";

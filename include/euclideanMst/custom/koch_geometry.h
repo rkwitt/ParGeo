@@ -1,26 +1,26 @@
-#pragma once
+#ifndef KOCH_GEOMETRY_H
+#define KOCH_GEOMETRY_H
 
 #include <vector>
 #include <cstdint>
+#include <string>
 #include <stdexcept>
 #include <cmath>
-#include "cnpy.h" 
 
-using namespace std;
-
-struct Vec2 { double x, y; };
-
-struct EdgeTable {
-    std::vector<double> x1, y1, x2, y2;   ///< Edge endpoints in SoA form.
-    std::vector<double> inv_dy;           ///< 1/(y2-y1) for non-horizontal edges.
-    std::vector<uint8_t> active;          ///< 1 if edge is non-horizontal; else 0.
-    double xmin, xmax, ymin, ymax;        ///< Axis-aligned bounding box of all edges.
+struct Vec2 { 
+    double x, y; 
 };
 
+struct EdgeTable {
+    std::vector<double> x1, y1, x2, y2;   // Edge endpoints in SoA form.
+    std::vector<double> inv_dy;           // 1/(y2-y1) for non-horizontal edges.
+    std::vector<uint8_t> active;          // 1 if edge is non-horizontal; else 0.
+    double xmin, xmax, ymin, ymax;        // Axis-aligned bounding box of all edges.
+};
 
-inline Vec2 operator+(const Vec2& a, const Vec2& b) { return {a.x + b.x, a.y + b.y}; }
-inline Vec2 operator-(const Vec2& a, const Vec2& b) { return {a.x - b.x, a.y - b.y}; }
-inline Vec2 operator*(const Vec2& a, double s) { return {a.x * s, a.y * s}; }
+[[nodiscard]] constexpr inline Vec2 operator+(const Vec2& a, const Vec2& b) { return {a.x + b.x, a.y + b.y}; }
+[[nodiscard]] constexpr inline Vec2 operator-(const Vec2& a, const Vec2& b) { return {a.x - b.x, a.y - b.y}; }
+[[nodiscard]] constexpr inline Vec2 operator*(const Vec2& a, double s) { return {a.x * s, a.y * s}; }
 
 std::vector<Vec2> koch_polygon(int depth);
 EdgeTable build_edge_table(const std::vector<Vec2>& poly);
@@ -41,9 +41,11 @@ Vec2 polygon_centroid_area(const std::vector<Vec2>& poly);
  *       passing precomputed sin/cos or using a rotation matrix to avoid repeated
  *       transcendental evaluations.
  */
-inline Vec2 rotate(const Vec2& v, double ang) {
+[[nodiscard]] inline Vec2 rotate(const Vec2& v, double ang) {
     double c = std::cos(ang), s = std::sin(ang);
     return {c*v.x - s*v.y, s*v.x + c*v.y};
 }
+
+#endif
 
 

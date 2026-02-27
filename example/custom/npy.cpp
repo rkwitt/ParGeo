@@ -1,5 +1,9 @@
+#include <cstring>      
+#include <stdexcept>
+
 #include "euclideanMst/custom/npy.h"
 
+[[nodiscard]]
 Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> 
 load_npy_to_eigen_row_major(const std::string& filename) {
     cnpy::NpyArray arr = cnpy::npy_load(filename);

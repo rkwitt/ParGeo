@@ -1,5 +1,11 @@
 #include "euclideanMst/custom/tri_sampler.h"
 
+#include <filesystem>
+
+bool file_exists(const std::string& path) {
+    return !path.empty() && std::filesystem::exists(path);
+}
+
 void mark_domains(CDT& cdt) {
     // Reset
     for (auto f = cdt.all_faces_begin(); f != cdt.all_faces_end(); ++f) {
@@ -69,13 +75,48 @@ void flood_fill_component(CDT& cdt,
     }
 }
 
-
 double tri_area(double ax, double ay, double bx, double by, double cx, double cy) {
     // 0.5 * |cross(b-a, c-a)|
     const double abx = bx - ax, aby = by - ay;
     const double acx = cx - ax, acy = cy - ay;
     const double cross = abx * acy - aby * acx;
     return 0.5 * std::abs(cross);
+}
+
+void write_sampler_binary(const KochTriSampler& S, const std::string& path) {
+    if (path.empty()) throw std::runtime_error("write_sampler_binary: empty path");
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+
+    // write to temp then rename (avoid partial files)
+    std::string tmp = path + ".tmp." + std::to_string(::getpid());
+
+    std::ofstream out(tmp, std::ios::binary);
+    if (!out) throw std::runtime_error("Cannot open file for write: " + tmp);
+
+    uint32_t magic = KOCHTRI_MAGIC;
+    uint32_t ver   = KOCHTRI_VER;
+    uint64_t ntri  = (uint64_t)S.tris.size();
+
+    out.write((char*)&magic, sizeof(magic));
+    out.write((char*)&ver,   sizeof(ver));
+    out.write((char*)&ntri,  sizeof(ntri));
+    out.write((char*)&S.total_area, sizeof(S.total_area));
+
+    // store Tri2 as raw doubles (portable enough across same arch; see note below)
+    for (const auto& t : S.tris) {
+        out.write((char*)&t.ax, sizeof(double));
+        out.write((char*)&t.ay, sizeof(double));
+        out.write((char*)&t.bx, sizeof(double));
+        out.write((char*)&t.by, sizeof(double));
+        out.write((char*)&t.cx, sizeof(double));
+        out.write((char*)&t.cy, sizeof(double));
+        out.write((char*)&t.area, sizeof(double));
+    }
+
+    out.close();
+    if (!out) throw std::runtime_error("Write failed: " + tmp);
+
+    std::filesystem::rename(tmp, path);
 }
 
 KochTriSampler read_sampler_binary(const std::string& path) {
@@ -124,6 +165,71 @@ KochTriSampler read_sampler_binary(const std::string& path) {
 
     if (S.tris.empty() || !(S.total_area > 0.0))
         throw std::runtime_error("Loaded empty/invalid sampler: " + path);
+
+    return S;
+}
+
+KochTriSampler build_koch_trisampler(int depth) {
+    // 1) Build polygon boundary vertices (your existing function)
+    std::vector<Vec2> poly = koch_polygon(depth);
+    if (poly.size() < 4) throw std::runtime_error("koch_polygon produced too few vertices");
+
+    // Ensure it's closed (your koch_polygon already returns closed)
+    if (!(poly.front().x == poly.back().x && poly.front().y == poly.back().y)) {
+        poly.push_back(poly.front());
+    }
+
+    // 2) Build CDT + insert constraints
+    CDT cdt;
+
+    // Insert constraints for each boundary segment (i -> i+1)
+    // IMPORTANT: CDT constraint insertion can handle repeated vertices, but it's
+    // cleaner to avoid the duplicate closing point when iterating segments.
+    const size_t n = poly.size();
+    for (size_t i = 0; i + 1 < n; ++i) {
+        const P2 a(poly[i].x,   poly[i].y);
+        const P2 b(poly[i+1].x, poly[i+1].y);
+        cdt.insert_constraint(a, b);
+    }
+
+    // 3) Mark inside faces
+    mark_domains(cdt);
+
+    // 4) Extract triangles (finite faces that are inside)
+    KochTriSampler S;
+    S.tris.reserve((size_t)cdt.number_of_faces()); // rough
+
+    for (auto f = cdt.finite_faces_begin(); f != cdt.finite_faces_end(); ++f) {
+        if (!f->info().in_domain()) continue;
+
+        const P2 p0 = f->vertex(0)->point();
+        const P2 p1 = f->vertex(1)->point();
+        const P2 p2 = f->vertex(2)->point();
+
+        Tri2 t;
+        t.ax = CGAL::to_double(p0.x()); t.ay = CGAL::to_double(p0.y());
+        t.bx = CGAL::to_double(p1.x()); t.by = CGAL::to_double(p1.y());
+        t.cx = CGAL::to_double(p2.x()); t.cy = CGAL::to_double(p2.y());
+        t.area = tri_area(t.ax, t.ay, t.bx, t.by, t.cx, t.cy);
+
+        // Degenerate faces should not happen, but skip if area ~ 0
+        if (t.area <= 0.0) continue;
+
+        S.tris.push_back(t);
+    }
+
+    if (S.tris.empty()) {
+        throw std::runtime_error("CDT produced no interior faces; check polygon validity / constraints.");
+    }
+
+    // 5) Prefix sums of areas
+    S.prefix.resize(S.tris.size());
+    double acc = 0.0;
+    for (size_t i = 0; i < S.tris.size(); ++i) {
+        acc += S.tris[i].area;
+        S.prefix[i] = acc;
+    }
+    S.total_area = acc;
 
     return S;
 }

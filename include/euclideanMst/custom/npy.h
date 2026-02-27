@@ -1,6 +1,12 @@
-#include <Eigen/Dense>
-#include <Eigen/SVD>
+#ifndef EUCLIDEAN_MST_CUSTOM_NPY_H
+#define EUCLIDEAN_MST_CUSTOM_NPY_H
 
+#include <cassert>
+#include <cstddef>
+#include <string>
+#include <vector>
+
+#include <Eigen/Dense>
 #include "cnpy.h" 
 
 Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> 
@@ -70,3 +76,5 @@ void write_pts_as_npy_xy(const T& pts, int num, const std::string& path) {
     // shape = (num, 2), row-major
     cnpy::npy_save(path, buf.data(), { (size_t)num, (size_t)2 }, "w");
 }
+
+#endif

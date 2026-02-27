@@ -1,7 +1,17 @@
-#pragma once
+#ifndef TRI_SAMPLER_H
+#define TRI_SAMPLER_H
 
-#include <vector>
+#include <algorithm>
+#include <cstdint>
+#include <cmath>
+#include <deque>
+#include <exception>
+#include <mutex>
 #include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "parlay/parallel.h"
 
 // CGAL includes for triangulating the Koch snowflake
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
@@ -13,6 +23,8 @@
 #include <CGAL/Polygon_2.h>
 #include <CGAL/enum.h> // for CGAL::ON_POSITIVE_SIDE etc. (optional)
 
+#include "euclideanMst/custom/rng.h"
+#include "euclideanMst/custom/config.h"
 #include "euclideanMst/custom/koch_geometry.h"
 
 struct Tri2 {
@@ -68,75 +80,80 @@ struct KochTriSampler {
     }
 };
 
-void mark_domains(CDT& cdt);
-void flood_fill_component(CDT& cdt, CDT::Face_handle start, int level, std::deque<CDT::Face_handle>& border);
-double tri_area(double ax, double ay, double bx, double by, double cx, double cy);
-KochTriSampler read_sampler_binary(const std::string& path);
-
 static constexpr uint32_t KOCHTRI_MAGIC = 0x4B4F4348; // 'KOCH'
 static constexpr uint32_t KOCHTRI_VER   = 1;
 
-static KochTriSampler build_koch_trisampler(int depth) {
-    // 1) Build polygon boundary vertices (your existing function)
-    std::vector<Vec2> poly = koch_polygon(depth);
-    if (poly.size() < 4) throw std::runtime_error("koch_polygon produced too few vertices");
+void mark_domains(CDT& cdt);
+void flood_fill_component(CDT& cdt, CDT::Face_handle start, int level, std::deque<CDT::Face_handle>& border);
+double tri_area(double ax, double ay, double bx, double by, double cx, double cy);
+void write_sampler_binary(const KochTriSampler& S, const std::string& path);
+KochTriSampler read_sampler_binary(const std::string& path);
+bool file_exists(const std::string& path);
+KochTriSampler build_koch_trisampler(int depth);
 
-    // Ensure it's closed (your koch_polygon already returns closed)
-    if (!(poly.front().x == poly.back().x && poly.front().y == poly.back().y)) {
-        poly.push_back(poly.front());
+template<typename T>
+void fill_from_koch_snowflake_2d_cdt(T& pts, const MstConfig& cfg) {
+    if (cfg.num_points <= 0) return;
+    if (cfg.koch_depth < 0) throw std::runtime_error("depth must be >= 0");
+
+    static std::mutex mtx;
+    static int cached_depth = -1;
+    static std::string cached_path;
+    static KochTriSampler sampler;
+
+    auto resolve_cache_path = [&](int depth) -> std::string {
+        // If user did not request disk caching at all
+        if (!cfg.use_triangulation_file)
+            return {};
+        // If user explicitly provided a path → use it
+        if (!cfg.triangulation_file.empty())
+            return cfg.triangulation_file;
+        // default
+        return "/tmp/koch_tris_depth_" + std::to_string(depth) + ".bin";
+    };
+
+    const std::string path = resolve_cache_path(cfg.koch_depth);
+
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+
+        bool need_rebuild = (cached_depth != cfg.koch_depth) || (cached_path != path);
+
+        if (need_rebuild) {
+            // 1) try load
+            bool loaded = false;
+            if (cfg.use_triangulation_file && file_exists(path)) {
+                sampler = read_sampler_binary(path);
+                loaded = true;
+            }
+
+            // 2) build if not loaded
+            if (!loaded) {
+                sampler = build_koch_trisampler(cfg.koch_depth);
+
+                if (cfg.use_triangulation_file && !path.empty()) {
+                    try {
+                        write_sampler_binary(sampler, path);
+                    } catch (const std::exception& e) {
+                        std::cerr << "[koch] warning: could not write triangulation cache: " << e.what() << "\n";
+                    }
+                }
+            }
+
+            cached_depth = cfg.koch_depth;
+            cached_path = path;
+        }
     }
 
-    // 2) Build CDT + insert constraints
-    CDT cdt;
+    if (sampler.empty()) throw std::runtime_error("sampler is empty");
 
-    // Insert constraints for each boundary segment (i -> i+1)
-    // IMPORTANT: CDT constraint insertion can handle repeated vertices, but it's
-    // cleaner to avoid the duplicate closing point when iterating segments.
-    const size_t n = poly.size();
-    for (size_t i = 0; i + 1 < n; ++i) {
-        const P2 a(poly[i].x,   poly[i].y);
-        const P2 b(poly[i+1].x, poly[i+1].y);
-        cdt.insert_constraint(a, b);
-    }
-
-    // 3) Mark inside faces
-    mark_domains(cdt);
-
-    // 4) Extract triangles (finite faces that are inside)
-    KochTriSampler S;
-    S.tris.reserve((size_t)cdt.number_of_faces()); // rough
-
-    for (auto f = cdt.finite_faces_begin(); f != cdt.finite_faces_end(); ++f) {
-        if (!f->info().in_domain()) continue;
-
-        const P2 p0 = f->vertex(0)->point();
-        const P2 p1 = f->vertex(1)->point();
-        const P2 p2 = f->vertex(2)->point();
-
-        Tri2 t;
-        t.ax = CGAL::to_double(p0.x()); t.ay = CGAL::to_double(p0.y());
-        t.bx = CGAL::to_double(p1.x()); t.by = CGAL::to_double(p1.y());
-        t.cx = CGAL::to_double(p2.x()); t.cy = CGAL::to_double(p2.y());
-        t.area = tri_area(t.ax, t.ay, t.bx, t.by, t.cx, t.cy);
-
-        // Degenerate faces should not happen, but skip if area ~ 0
-        if (t.area <= 0.0) continue;
-
-        S.tris.push_back(t);
-    }
-
-    if (S.tris.empty()) {
-        throw std::runtime_error("CDT produced no interior faces; check polygon validity / constraints.");
-    }
-
-    // 5) Prefix sums of areas
-    S.prefix.resize(S.tris.size());
-    double acc = 0.0;
-    for (size_t i = 0; i < S.tris.size(); ++i) {
-        acc += S.tris[i].area;
-        S.prefix[i] = acc;
-    }
-    S.total_area = acc;
-
-    return S;
+    parlay::parallel_for(0, cfg.num_points, [&](int i) {
+        auto& rng = tls_rng();
+        double x, y;
+        sampler.sample(rng, x, y);
+        pts[i].x[0] = x;
+        pts[i].x[1] = y;
+    });
 }
+
+#endif // TRI_SAMPLER_H

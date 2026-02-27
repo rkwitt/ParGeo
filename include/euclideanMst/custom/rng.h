@@ -1,4 +1,11 @@
-#pragma once
+#ifndef EUCLIDEAN_MST_CUSTOM_RNG_H
+#define EUCLIDEAN_MST_CUSTOM_RNG_H
+
+#include <cstdint>
+#include <random>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 /**
  * @brief xoshiro256++ pseudorandom number generator.
@@ -234,3 +241,5 @@ static inline double normal01(Xoshiro256pp& rng) {
     u1 = std::max(u1, 1e-300);
     return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
 }
+
+#endif

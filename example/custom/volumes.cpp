@@ -1,3 +1,7 @@
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+
 #include "euclideanMst/custom/volumes.h"
 
 /**

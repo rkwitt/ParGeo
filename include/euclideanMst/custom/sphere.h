@@ -1,10 +1,16 @@
-#include <cmath>
-#include <iostream>
+#ifndef EUCLIDEAN_MST_CUSTOM_SPHERE_H
+#define EUCLIDEAN_MST_CUSTOM_SPHERE_H
 
-using namespace std;
+#include <algorithm>   
+#include <cmath>       
+#include <limits>      
+#include <stdexcept>
+
+namespace emstExtension::custom {
 
 inline double sphere_geodesic_from_chord(double chord) noexcept {
     // chord should be in [0,2] for unit sphere; clamp for numerical safety
+    if (!std::isfinite(chord)) return std::numeric_limits<double>::quiet_NaN();
     double x = 0.5 * chord;
     if (x <= 0.0) return 0.0;
     if (x >= 1.0) return M_PI; // antipodal (or clamp)
@@ -12,6 +18,7 @@ inline double sphere_geodesic_from_chord(double chord) noexcept {
 }
 
 inline double sphere_geodesic_from_chord_atan2(double chord) noexcept {
+    if (!std::isfinite(chord)) return std::numeric_limits<double>::quiet_NaN();
     double c = std::clamp(chord, 0.0, 2.0);
     double dot = 1.0 - 0.5 * c * c;   // cos(theta)
     double sin_theta = std::sqrt(std::max(0.0, 1.0 - dot * dot));
@@ -53,7 +60,7 @@ inline double sphere_geodesic_from_chord_atan2(double chord) noexcept {
  * - For large n, computing the log surface area is numerically stable,
  *   while the surface area itself may overflow in double precision.
  */
-static inline long double sphere_log_surface_area(int n) {
+inline long double sphere_log_surface_area(int n) {
     if (n < 0) throw std::runtime_error("compute_sphere_log_surface_area: n must be >= 0");
 
     const long double pi = acosl(-1.0L);
@@ -95,13 +102,11 @@ static inline long double sphere_log_surface_area(int n) {
  * Numerical notes:
  *  - Uses long double internally for improved stability.
  *  - Underflow is clamped to 0 instead of producing subnormals.
- *  - If `expl` is unavailable, `exp(lv)` may be used (with slightly
- *    reduced precision before casting to double).
  *
  * Exceptions:
  *  - Propagates any exception thrown by `sphere_log_surface_area`.
  */
-static inline double sphere_surface_area(int n) {
+inline double sphere_surface_area(int n) {
     const long double lv = sphere_log_surface_area(n);
 
     const long double log_max = logl((long double)std::numeric_limits<double>::max());
@@ -109,5 +114,9 @@ static inline double sphere_surface_area(int n) {
 
     if (lv > log_max) return std::numeric_limits<double>::infinity();
     if (lv < log_min) return 0.0;
-    return (double)expl(lv); // if expl missing in your env, use exp(lv)
+    return (double)expl(lv);
 }
+
+}
+
+#endif // EUCLIDEAN_MST_CUSTOM_SPHERE_H
