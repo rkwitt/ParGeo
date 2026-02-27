@@ -15,6 +15,9 @@
 #include <deque>
 #include <mutex>
 
+#include <boost/program_options.hpp>
+#include <Eigen/Dense>
+
 #include "euclideanMst/custom/koch_geometry.h"
 #include "euclideanMst/custom/volumes.h"
 #include "euclideanMst/custom/sphere.h"
@@ -26,18 +29,9 @@
 #include "euclideanMst/custom/samplers.h"
 
 #include "euclideanMst/euclideanMst.h"
-
-#include "parlay/parallel.h"
 #include "parlay/utilities.h"
 #include "pargeo/point.h"
-#include "pargeo/parseCommandLine.h"
-#include "spatialGraph/spatialGraph.h"
 
-#include <boost/program_options.hpp>
-
-#include <Eigen/Dense>
-#include <Eigen/SVD>
-#include "cnpy.h" 
 
 namespace po = boost::program_options;
 using namespace std;
@@ -240,61 +234,136 @@ static std::tuple<int, double> dispatch(int dim, int p, const MstConfig& cfg) {
     return dispatchTable[dim - 2][p - 1](cfg);
 }
 
-int main(int argc, char* argv[]) 
-{
-    std::string input_file;           // input file (binary numpy tensor)
-    std::string db_file;              // SQLite3 database file
-    std::string shape;                // sample from ball or cube
-    int num_points = -1;              // is set on cmdline
-    int dim = -1;                     // is set on cmdline
-    int intdim = -1;                  // will be computed
-    int p = 1;                        // default p
-    int gr_n = -1;                    // ambient dim. of Gr(n,k)
-    int gr_k = -1;                    // subspace dim of Gr(n,k)
-    int koch_depth = 5;               // default depth of Koch snowflake
-    bool use_sphere_geodesic = false; // convert Eucl. distance to geodesic distance on sphere (for shape=sphere)
-    double volume = std::numeric_limits<double>::quiet_NaN(); // default to NaN, will be computed
-    bool use_triangulation_file = false;
-    bool write_triangulation_file = true;
-    std::string triangulation_file;
-    
-    try {
-        po::options_description desc("Options");
-        desc.add_options()
-            ("help", "produce help message")
-            ("dim", po::value<int>(&dim)->required(), "dimensionality of input vectors (R^d).")
-            ("num_points", po::value<int>(&num_points)->required(), "Number of points to sample.")
-            ("shape", po::value<std::string>(&shape)->required(), "Sample from cube|ball|sphere|grassmann|koch.")
-            ("db_file", po::value<std::string>(&db_file)->required(), "SQLite3 database file.")
-            ("p", po::value<int>(&p), "Power of edge lengths.")
-            ("input_file", po::value<std::string>(&input_file), "Numpy matrix input file.")
-            ("gr_n", po::value<int>(&gr_n), "Grassmann ambient dimension n (R^n).")
-            ("gr_k", po::value<int>(&gr_k), "Grassmann subspace dimension k.")
-            ("use_sphere_geodesic", po::bool_switch(&use_sphere_geodesic)->default_value(false), "Convert dist. to chord length.")
-            ("koch_depth", po::value<int>(&koch_depth)->default_value(5), "Recursion depth for Koch snowflake.")
-            ("use_triangulation_file", po::bool_switch(&use_triangulation_file)->default_value(false), "Write and use triangulation file.")
-            ("triangulation_file", po::value<std::string>(&triangulation_file)->default_value(""), "Path to triangulation file.");
+static void print_colored_help(const po::options_description& all) {
+    using fmt::print;
+    using fmt::fg;
+    using fmt::color;
+    using fmt::emphasis;
 
-        po::variables_map vm;
-        po::store(po::parse_command_line(argc, argv, desc), vm);
+    print(fg(color::blue) | emphasis::bold,
+        "\nMST Computation Options\n");
+    print(fg(color::dark_gray),
+        "-------------------------------------------------------------------------------------\n\n");
+
+    for (const auto& opt : all.options()) {
+        std::string name = opt->long_name();
+        std::string desc = opt->description();
+        print(fg(color::green) | emphasis::bold,
+            "  --{:20}", name);
+        print(fg(color::white),
+            " {}\n", desc);
+    }
+    print("\n");
+}
+
+static void print_shape_requirements() {
+    std::cout
+        << "Shape-specific requirements:\n"
+        << "  cube/ball:    require --dim, and either --num_points or --input_file\n"
+        << "  sphere:       require --dim>=2; optional --use_sphere_geodesic\n"
+        << "  koch:         require --dim 2 and --koch_depth>=0\n"
+        << "  grassmann:    require --gr_n>0, 0<=--gr_k<=--gr_n, and --dim == gr_n*gr_n\n";
+}
+
+static MstConfig parse_cli(int argc, char* argv[], std::string& db_file, int& dim, int& p)
+{
+    std::string input_file;
+    std::string shape_str;
+
+    int num_points = -1;
+    int gr_n = -1;
+    int gr_k = -1;
+    int koch_depth = 5;
+    bool use_sphere_geodesic = false;
+    bool use_triangulation_file = false;
+    std::string triangulation_file;
+
+    po::options_description base("Base options");
+    base.add_options()
+        ("help,h", "Produce help message")
+        ("dim", po::value<int>(&dim)->required(), "Dimensionality of input vectors (R^d).")
+        ("p", po::value<int>(&p)->default_value(1), "Power of edge lengths (1..5).")
+        ("shape", po::value<std::string>(&shape_str)->required(), "cube|ball|sphere|grassmann|koch")
+        ("db_file", po::value<std::string>(&db_file)->required(), "SQLite3 database file.")
+        ("input_file", po::value<std::string>(&input_file)->default_value(""), "Numpy matrix input file.")
+        ("num_points", po::value<int>(&num_points)->default_value(-1),
+            "Number of points to sample (required if no --input_file).");
+
+    po::options_description sphere_opts("Sphere options");
+    sphere_opts.add_options()
+        ("use_sphere_geodesic",
+        po::bool_switch(&use_sphere_geodesic)->default_value(false),
+        "For shape=sphere: convert chord length to geodesic distance.");
+
+    po::options_description grassmann_opts("Grassmann options");
+    grassmann_opts.add_options()
+        ("gr_n", po::value<int>(&gr_n)->default_value(-1), "For shape=grassmann: ambient dimension n (R^n).")
+        ("gr_k", po::value<int>(&gr_k)->default_value(-1), "For shape=grassmann: subspace dimension k.");
+
+    po::options_description koch_opts("Koch options");
+    koch_opts.add_options()
+        ("koch_depth", po::value<int>(&koch_depth)->default_value(5), "For shape=koch: recursion depth.")
+        ("use_triangulation_file",
+        po::bool_switch(&use_triangulation_file)->default_value(false),
+        "For shape=koch: enable disk cache for triangulation.")
+        ("triangulation_file",
+        po::value<std::string>(&triangulation_file)->default_value(""),
+        "For shape=koch: triangulation cache path (default /tmp/...).");
+
+    po::options_description all("Options");
+    all.add(base).add(sphere_opts).add(grassmann_opts).add(koch_opts);
+
+    po::variables_map vm;
+    try {
+        po::store(po::parse_command_line(argc, argv, all), vm);
 
         if (vm.count("help")) {
-            std::cout << desc << "\n";
-            return 0;
+            print_colored_help(all);            
+            print_shape_requirements();
+            std::cout << "\n";
+            std::exit(0);
         }
+
         po::notify(vm);
-    } catch (const po::error &ex) {
-        std::cerr << "Error: " << ex.what() << "\n";
-        return 1;
+    } catch (const po::error& ex) {
+        std::cerr << "CLI error: " << ex.what() << "\n\n" << all << "\n";
+        print_shape_requirements();
+        std::cerr << "\n";
+        std::exit(1);
+    }
+    auto require = [&](bool cond, const char* msg) {
+        if (!cond) throw po::error(msg);
+    };
+
+    Shape sh;
+    try {
+        sh = parse_shape(shape_str);
+    } catch (const std::exception& e) {
+        throw po::error(e.what());
     }
 
-    std::cout << std::scientific << std::setprecision(12);
+    require(!input_file.empty() || num_points > 0,
+            "Either --input_file must be provided or --num_points must be > 0.");
 
-    // MST configuration struct to pass to dispatch
+    if (sh == Shape::Sphere) {
+        require(dim >= 2, "--shape sphere requires --dim >= 2.");
+    }
+
+    if (sh == Shape::Koch) {
+        require(dim == 2, "--shape koch requires --dim 2.");
+        require(koch_depth > 0, "--shape koch requires --koch_depth > 0.");
+    }
+
+    if (sh == Shape::Grassmann) {
+        require(gr_n > 2, "--shape grassmann requires --gr_n > 2.");
+        require(gr_k > 0 && gr_k < gr_n, "--shape grassmann requires 0 < --gr_k < --gr_n.");
+        require(dim == gr_n * gr_n, "--shape grassmann requires --dim == gr_n*gr_n.");
+    }
+
     MstConfig cfg;
     cfg.num_points = num_points;
     cfg.input_file = input_file;
-    cfg.shape = parse_shape(shape);
+    cfg.shape = sh;
     cfg.gr_n = gr_n;
     cfg.gr_k = gr_k;
     cfg.use_sphere_geodesic = use_sphere_geodesic;
@@ -302,49 +371,64 @@ int main(int argc, char* argv[])
     cfg.use_triangulation_file = use_triangulation_file;
     cfg.triangulation_file = triangulation_file;
 
+    return cfg;
+}
+
+int main(int argc, char* argv[]) 
+{
+    int dim = -1;
+    int p = 1;
+    std::string db_file;
+
+    MstConfig cfg;
     try {
-        // Dispatch MST computation
-        std::tuple<int, double> result = dispatch(dim, p, cfg);
+        cfg = parse_cli(argc, argv, db_file, dim, p);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
 
-        num_points = std::get<0>(result);
-        double mst_length = std::get<1>(result);
+    std::cout << std::scientific << std::setprecision(12);
 
-        // Compute volume and intrinsic dimension for normalization based on shape.
+    try {
+        const auto result = dispatch(dim, p, cfg);
+        const int n_used = std::get<0>(result);
+        const double mst_length = std::get<1>(result);
+
+        int intdim = -1;
+        double volume = std::numeric_limits<double>::quiet_NaN();
         if (cfg.shape == Shape::Grassmann) {
-            if (cfg.gr_n <= 0 || cfg.gr_k < 0) throw std::runtime_error("--shape grassmann requires --gr_n and --gr_k");
-            if (cfg.gr_n <= cfg.gr_k) throw std::runtime_error("--shape grassmann requires gr_n > gr_k");
             if (!std::isfinite(volume)) volume = grassmann_volume(cfg.gr_n, cfg.gr_k);
             intdim = cfg.gr_k * (cfg.gr_n - cfg.gr_k);
         } else if (cfg.shape == Shape::Sphere) {
-            if (dim < 2) throw std::runtime_error("Sphere requires dim >= 2");
             if (!std::isfinite(volume)) volume = emstExtension::custom::sphere_surface_area(dim - 1);
             intdim = dim - 1;
         } else if (cfg.shape == Shape::Ball) {
             if (!std::isfinite(volume)) volume = unit_ball_volume(dim);
             intdim = dim;
         } else if (cfg.shape == Shape::Koch) {
-            if (dim != 2) throw std::runtime_error("--shape koch requires --dim 2");
-            if (cfg.koch_depth < 0) throw std::runtime_error("--koch_depth must be >= 0");
-            auto poly = koch_polygon(cfg.koch_depth);
+            const auto poly = koch_polygon(cfg.koch_depth);
             volume = polygon_area(poly);
             intdim = 2;
         } else if (cfg.shape == Shape::Cube) {
             if (!std::isfinite(volume)) volume = 1.0;
             intdim = dim;
+        } else {
+            throw std::runtime_error("Unsupported shape in config");
         }
-        
-        double mst_length_normalized = stable_normalized_mst(mst_length, num_points, p, intdim, volume);
+
+        const double mst_length_normalized = stable_normalized_mst(mst_length, n_used, p, intdim, volume);
         fmt::print(
             "| n={:>8d} | volume={:>20.16f} | dim={:>2d} | intdim={:>2d} | L_n={:>22.12f} | L_n (norm)={:>22.16f}\n",
-            num_points, volume, dim, intdim, mst_length, 
+            n_used, volume, dim, intdim, mst_length, 
             fmt::styled(mst_length_normalized,fmt::fg(fmt::color::green) | fmt::emphasis::bold)
         );
 
-        write_to_database(db_file, num_points, mst_length, mst_length_normalized);
+        write_to_database(db_file, n_used, mst_length, mst_length_normalized);
 
-    } catch (std::exception& e) {
-        std::cerr << "Error: " << e.what() << "\n";
-        return -1;
+    } catch (const std::exception& e) {
+        std::cerr << "Runtime error: " << e.what() << "\n";
+        return 1;
     }
     return 0;
 }
