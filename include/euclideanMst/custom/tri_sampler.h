@@ -13,7 +13,7 @@
 
 #include "parlay/parallel.h"
 
-// CGAL includes for triangulating the Koch snowflake
+#include <CGAL/Constrained_triangulation_plus_2.h>
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Triangulation_vertex_base_2.h>
 #include <CGAL/Constrained_triangulation_face_base_2.h>
@@ -26,6 +26,7 @@
 #include "euclideanMst/custom/rng.h"
 #include "euclideanMst/custom/config.h"
 #include "euclideanMst/custom/koch_geometry.h"
+#include "euclideanMst/custom/systematic_fractal_geometry.h"
 
 struct Tri2 {
     double ax, ay;
@@ -47,7 +48,10 @@ using Fb  = CGAL::Triangulation_face_base_with_info_2<FaceInfo2, K, Fbb>;
 using TDS = CGAL::Triangulation_data_structure_2<Vb, Fb>;
 using CDT = CGAL::Constrained_Delaunay_triangulation_2<K, TDS>;
 
-struct KochTriSampler {
+// using CDTBase = CGAL::Constrained_Delaunay_triangulation_2<K, TDS>;
+// using CDT     = CGAL::Constrained_triangulation_plus_2<CDTBase>;
+
+struct TriSampler {
     std::vector<Tri2> tris;
     std::vector<double> prefix; // prefix[i] = sum_{j<=i} area_j
     double total_area = 0.0;
@@ -80,16 +84,17 @@ struct KochTriSampler {
     }
 };
 
-static constexpr uint32_t KOCHTRI_MAGIC = 0x4B4F4348; // 'KOCH'
-static constexpr uint32_t KOCHTRI_VER   = 1;
+static constexpr uint32_t TRI_MAGIC = 0x4B4F4348; // 'KOCH'
+static constexpr uint32_t TRI_VER   = 1;
 
 void mark_domains(CDT& cdt);
 void flood_fill_component(CDT& cdt, CDT::Face_handle start, int level, std::deque<CDT::Face_handle>& border);
 double tri_area(double ax, double ay, double bx, double by, double cx, double cy);
-void write_sampler_binary(const KochTriSampler& S, const std::string& path);
-KochTriSampler read_sampler_binary(const std::string& path);
+void write_sampler_binary(const TriSampler& S, const std::string& path);
+TriSampler read_sampler_binary(const std::string& path);
 bool file_exists(const std::string& path);
-KochTriSampler build_koch_trisampler(int depth);
+TriSampler build_trisampler(int depth);
+TriSampler build_polygon_trisampler(const std::vector<Vec2>& poly_closed);
 
 template<typename T>
 void fill_from_koch_snowflake_2d_cdt(T& pts, const MstConfig& cfg) {
@@ -99,7 +104,7 @@ void fill_from_koch_snowflake_2d_cdt(T& pts, const MstConfig& cfg) {
     static std::mutex mtx;
     static int cached_depth = -1;
     static std::string cached_path;
-    static KochTriSampler sampler;
+    static TriSampler sampler;
 
     auto resolve_cache_path = [&](int depth) -> std::string {
         // If user did not request disk caching at all
@@ -129,7 +134,7 @@ void fill_from_koch_snowflake_2d_cdt(T& pts, const MstConfig& cfg) {
 
             // 2) build if not loaded
             if (!loaded) {
-                sampler = build_koch_trisampler(cfg.koch_depth);
+                sampler = build_trisampler(cfg.koch_depth);
 
                 if (cfg.use_triangulation_file && !path.empty()) {
                     try {
@@ -146,6 +151,73 @@ void fill_from_koch_snowflake_2d_cdt(T& pts, const MstConfig& cfg) {
     }
 
     if (sampler.empty()) throw std::runtime_error("sampler is empty");
+
+    parlay::parallel_for(0, cfg.num_points, [&](int i) {
+        auto& rng = tls_rng();
+        double x, y;
+        sampler.sample(rng, x, y);
+        pts[i].x[0] = x;
+        pts[i].x[1] = y;
+    });
+}
+
+template<typename T>
+void fill_from_systematic_fractal_2d_cdt(T& pts, const MstConfig& cfg) {
+    if (cfg.num_points <= 0) return;
+    if (cfg.sys_depth < 1)  throw std::runtime_error("sys_depth must be >= 1");
+    if (cfg.sys_degree < 1) throw std::runtime_error("sys_degree must be >= 1");
+    if ((cfg.sys_degree % 2) == 0)
+        throw std::runtime_error("systematic sampler: only odd degrees are currently supported.");
+
+    static std::mutex mtx;
+    static int cached_depth = -1;
+    static int cached_degree = -1;
+    static std::string cached_path;
+    static TriSampler sampler;
+
+    auto resolve_cache_path = [&](int degree, int depth) -> std::string {
+        if (!cfg.use_triangulation_file) return {};
+        if (!cfg.triangulation_file.empty()) return cfg.triangulation_file;
+        return "/tmp/systematic_tris_deg_" + std::to_string(degree) + "_depth_" + std::to_string(depth) + ".bin";
+    };
+
+    const std::string path = resolve_cache_path(cfg.sys_degree, cfg.sys_depth);
+
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+
+        const bool need_rebuild =
+            (cached_depth  != cfg.sys_depth)  ||
+            (cached_degree != cfg.sys_degree) ||
+            (cached_path   != path);
+
+        if (need_rebuild) {
+            bool loaded = false;
+
+            if (cfg.use_triangulation_file && file_exists(path)) {
+                sampler = read_sampler_binary(path);
+                loaded = true;
+            }
+
+            if (!loaded) {
+                auto poly = systematic_polygon(cfg.sys_degree, cfg.sys_depth, /*closed=*/true);
+                sampler = build_polygon_trisampler(poly);
+
+                if (cfg.use_triangulation_file && !path.empty()) {
+                    try { write_sampler_binary(sampler, path); }
+                    catch (const std::exception& e) {
+                        std::cerr << "[systematic] warning: could not write triangulation cache: " << e.what() << "\n";
+                    }
+                }
+            }
+
+            cached_depth  = cfg.sys_depth;
+            cached_degree = cfg.sys_degree;
+            cached_path   = path;
+        }
+    }
+
+    if (sampler.empty()) throw std::runtime_error("systematic sampler is empty");
 
     parlay::parallel_for(0, cfg.num_points, [&](int i) {
         auto& rng = tls_rng();

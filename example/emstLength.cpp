@@ -182,6 +182,9 @@ void fill_points_from_config(
             if (cfg.koch_depth < 0) throw std::runtime_error("koch_depth must be >= 0");
             fill_from_koch_snowflake_2d_cdt(pts, cfg);
             return;
+        case Shape::Systematic:
+            fill_from_systematic_fractal_2d_cdt(pts, cfg);
+            return;
         case Shape::Grassmann:
             if (cfg.gr_n <= 0) throw std::runtime_error("shape=grassmann requires gr_n > 0");
             if (cfg.gr_k < 0 || cfg.gr_k > cfg.gr_n) throw std::runtime_error("shape=grassmann requires 0 <= gr_k <= gr_n");
@@ -241,7 +244,7 @@ static void print_colored_help(const po::options_description& all) {
     using fmt::emphasis;
 
     print(fg(color::blue) | emphasis::bold,
-        "\nMST Computation Options\n");
+        "MST Computation Options\n");
     print(fg(color::dark_gray),
         "-------------------------------------------------------------------------------------\n\n");
 
@@ -262,6 +265,7 @@ static void print_shape_requirements() {
         << "  cube/ball:    require --dim, and either --num_points or --input_file\n"
         << "  sphere:       require --dim>=2; optional --use_sphere_geodesic\n"
         << "  koch:         require --dim 2 and --koch_depth>=0\n"
+        << "  systematic:   require --dim 2 and --sys_degree>=1 and --sys_depth>=1\n"
         << "  grassmann:    require --gr_n>0, 0<=--gr_k<=--gr_n, and --dim == gr_n*gr_n\n";
 }
 
@@ -276,13 +280,15 @@ static MstConfig parse_cli(int argc, char* argv[], std::string& db_file, int& di
     int koch_depth = 5;
     bool use_sphere_geodesic = false;
     bool use_triangulation_file = false;
+    int sys_degree = -1;
+    int sys_depth = -1;
     std::string triangulation_file;
 
     po::options_description base("Base options");
     base.add_options()
         ("help,h", "Produce help message")
         ("dim", po::value<int>(&dim)->required(), "Dimensionality of input vectors (R^d).")
-        ("p", po::value<int>(&p)->default_value(1), "Power of edge lengths (1..5).")
+        ("p", po::value<int>(&p)->default_value(1), "Power of edge lengths.")
         ("shape", po::value<std::string>(&shape_str)->required(), "cube|ball|sphere|grassmann|koch")
         ("db_file", po::value<std::string>(&db_file)->required(), "SQLite3 database file.")
         ("input_file", po::value<std::string>(&input_file)->default_value(""), "Numpy matrix input file.")
@@ -300,18 +306,26 @@ static MstConfig parse_cli(int argc, char* argv[], std::string& db_file, int& di
         ("gr_n", po::value<int>(&gr_n)->default_value(-1), "For shape=grassmann: ambient dimension n (R^n).")
         ("gr_k", po::value<int>(&gr_k)->default_value(-1), "For shape=grassmann: subspace dimension k.");
 
-    po::options_description koch_opts("Koch options");
+    po::options_description systematic_opts("Systematic fractal options");
+    grassmann_opts.add_options()
+        ("sys_degree", po::value<int>(&sys_degree)->default_value(1), "For shape=systematic: degree of the fractal.")
+        ("sys_depth", po::value<int>(&sys_depth)->default_value(5), "For shape=systematic: recursion depth.");
+
+    po::options_description koch_opts("Koch fractal options");
     koch_opts.add_options()
-        ("koch_depth", po::value<int>(&koch_depth)->default_value(5), "For shape=koch: recursion depth.")
+        ("koch_depth", po::value<int>(&koch_depth)->default_value(5), "For shape=koch: recursion depth.");
+
+    po::options_description fractal_opts("General fractal options");
+    koch_opts.add_options()
         ("use_triangulation_file",
         po::bool_switch(&use_triangulation_file)->default_value(false),
-        "For shape=koch: enable disk cache for triangulation.")
+        "For shape=koch|systematic: enable disk cache for triangulation.")
         ("triangulation_file",
         po::value<std::string>(&triangulation_file)->default_value(""),
-        "For shape=koch: triangulation cache path (default /tmp/...).");
+        "For shape=koch|systematic: triangulation cache path (default /tmp/...).");
 
     po::options_description all("Options");
-    all.add(base).add(sphere_opts).add(grassmann_opts).add(koch_opts);
+    all.add(base).add(sphere_opts).add(grassmann_opts).add(systematic_opts).add(fractal_opts).add(koch_opts);
 
     po::variables_map vm;
     try {
@@ -354,6 +368,14 @@ static MstConfig parse_cli(int argc, char* argv[], std::string& db_file, int& di
         require(koch_depth > 0, "--shape koch requires --koch_depth > 0.");
     }
 
+    if (sh == Shape::Systematic) {
+        require(dim == 2, "--shape systematic requires --dim 2.");
+        require(sys_degree >= 1, "--shape systematic requires --sys_degree >= 1.");
+        require(sys_depth  >= 1, "--shape systematic requires --sys_depth >= 1.");
+        require((sys_degree % 2) == 1,
+                "--shape systematic currently supports only odd degrees (use --sys_degree 1,3,5,...).");
+    }
+
     if (sh == Shape::Grassmann) {
         require(gr_n > 2, "--shape grassmann requires --gr_n > 2.");
         require(gr_k > 0 && gr_k < gr_n, "--shape grassmann requires 0 < --gr_k < --gr_n.");
@@ -370,6 +392,8 @@ static MstConfig parse_cli(int argc, char* argv[], std::string& db_file, int& di
     cfg.koch_depth = koch_depth;
     cfg.use_triangulation_file = use_triangulation_file;
     cfg.triangulation_file = triangulation_file;
+    cfg.sys_degree = sys_degree;
+    cfg.sys_depth = sys_depth;
 
     return cfg;
 }
@@ -408,6 +432,10 @@ int main(int argc, char* argv[])
             intdim = dim;
         } else if (cfg.shape == Shape::Koch) {
             const auto poly = koch_polygon(cfg.koch_depth);
+            volume = polygon_area(poly);
+            intdim = 2;
+        } else if (cfg.shape == Shape::Systematic) {
+            const auto poly = systematic_polygon(cfg.sys_degree, cfg.sys_depth, /*closed=*/true);
             volume = polygon_area(poly);
             intdim = 2;
         } else if (cfg.shape == Shape::Cube) {

@@ -13,7 +13,7 @@ find_package(CGAL REQUIRED)
 set(EMST_INCLUDE_DIRECTORIES 
   /usr/include/eigen3
   /scratch1/rkwitt/spanning_trees_code/external/cnpy-install/include)
-add_executable(emstLength emstLength.cpp custom/sql.cpp custom/npy.cpp custom/volumes.cpp custom/koch_geometry.cpp custom/tri_sampler.cpp) 
+add_executable(emstLength emstLength.cpp custom/sql.cpp custom/npy.cpp custom/volumes.cpp custom/koch_geometry.cpp custom/tri_sampler.cpp custom/systematic_fractal_geometry.cpp) 
 target_include_directories(emstLength PRIVATE ${EMST_INCLUDE_DIRECTORIES})
 target_link_libraries(emstLength
   pargeoLib

@@ -83,7 +83,7 @@ double tri_area(double ax, double ay, double bx, double by, double cx, double cy
     return 0.5 * std::abs(cross);
 }
 
-void write_sampler_binary(const KochTriSampler& S, const std::string& path) {
+void write_sampler_binary(const TriSampler& S, const std::string& path) {
     if (path.empty()) throw std::runtime_error("write_sampler_binary: empty path");
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
 
@@ -93,8 +93,8 @@ void write_sampler_binary(const KochTriSampler& S, const std::string& path) {
     std::ofstream out(tmp, std::ios::binary);
     if (!out) throw std::runtime_error("Cannot open file for write: " + tmp);
 
-    uint32_t magic = KOCHTRI_MAGIC;
-    uint32_t ver   = KOCHTRI_VER;
+    uint32_t magic = TRI_MAGIC;
+    uint32_t ver   = TRI_VER;
     uint64_t ntri  = (uint64_t)S.tris.size();
 
     out.write((char*)&magic, sizeof(magic));
@@ -119,7 +119,7 @@ void write_sampler_binary(const KochTriSampler& S, const std::string& path) {
     std::filesystem::rename(tmp, path);
 }
 
-KochTriSampler read_sampler_binary(const std::string& path) {
+TriSampler read_sampler_binary(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::runtime_error("Cannot open file for read: " + path);
 
@@ -133,10 +133,10 @@ KochTriSampler read_sampler_binary(const std::string& path) {
     in.read((char*)&total_area, sizeof(total_area));
 
     if (!in) throw std::runtime_error("Corrupt header: " + path);
-    if (magic != KOCHTRI_MAGIC) throw std::runtime_error("Bad magic (not a koch tri file): " + path);
-    if (ver != KOCHTRI_VER) throw std::runtime_error("Unsupported version: " + std::to_string(ver));
+    if (magic != TRI_MAGIC) throw std::runtime_error("Bad magic (not a koch tri file): " + path);
+    if (ver != TRI_VER) throw std::runtime_error("Unsupported version: " + std::to_string(ver));
 
-    KochTriSampler S;
+    TriSampler S;
     S.tris.resize((size_t)ntri);
     S.total_area = total_area;
 
@@ -169,7 +169,7 @@ KochTriSampler read_sampler_binary(const std::string& path) {
     return S;
 }
 
-KochTriSampler build_koch_trisampler(int depth) {
+TriSampler build_trisampler(int depth) {
     // 1) Build polygon boundary vertices (your existing function)
     std::vector<Vec2> poly = koch_polygon(depth);
     if (poly.size() < 4) throw std::runtime_error("koch_polygon produced too few vertices");
@@ -196,7 +196,7 @@ KochTriSampler build_koch_trisampler(int depth) {
     mark_domains(cdt);
 
     // 4) Extract triangles (finite faces that are inside)
-    KochTriSampler S;
+    TriSampler S;
     S.tris.reserve((size_t)cdt.number_of_faces()); // rough
 
     for (auto f = cdt.finite_faces_begin(); f != cdt.finite_faces_end(); ++f) {
@@ -231,5 +231,72 @@ KochTriSampler build_koch_trisampler(int depth) {
     }
     S.total_area = acc;
 
+    return S;
+}
+
+TriSampler build_polygon_trisampler(const std::vector<Vec2>& poly_in) {
+    std::vector<Vec2> poly = poly_in;
+    if (poly.size() < 4) throw std::runtime_error("build_polygon_trisampler: polygon too small");
+
+    // Ensure closed
+    if (!(poly.front().x == poly.back().x && poly.front().y == poly.back().y)) {
+        poly.push_back(poly.front());
+    }
+
+    CGAL::Polygon_2<K> P;
+
+    for (size_t i = 0; i + 1 < poly.size(); ++i) {  // skip duplicate last vertex
+        P.push_back(P2(poly[i].x, poly[i].y));
+    }
+
+    if (!P.is_simple()) {
+        throw std::runtime_error(
+            "Polygon is not simple (self-intersects). "
+            "Try smaller depth/degree or enable intersection handling.");
+    }
+
+    CDT cdt;
+
+    // Insert constraints
+    for (size_t i = 0; i + 1 < poly.size(); ++i) {
+        const P2 a(poly[i].x,   poly[i].y);
+        const P2 b(poly[i+1].x, poly[i+1].y);
+        cdt.insert_constraint(a, b);
+    }
+
+    // Mark interior faces
+    mark_domains(cdt);
+
+    TriSampler S;
+    S.tris.reserve((size_t)cdt.number_of_faces());
+
+    for (auto f = cdt.finite_faces_begin(); f != cdt.finite_faces_end(); ++f) {
+        if (!f->info().in_domain()) continue;
+
+        const P2 p0 = f->vertex(0)->point();
+        const P2 p1 = f->vertex(1)->point();
+        const P2 p2 = f->vertex(2)->point();
+
+        Tri2 t;
+        t.ax = CGAL::to_double(p0.x()); t.ay = CGAL::to_double(p0.y());
+        t.bx = CGAL::to_double(p1.x()); t.by = CGAL::to_double(p1.y());
+        t.cx = CGAL::to_double(p2.x()); t.cy = CGAL::to_double(p2.y());
+        t.area = tri_area(t.ax, t.ay, t.bx, t.by, t.cx, t.cy);
+        if (t.area <= 0.0) continue;
+        S.tris.push_back(t);
+    }
+
+    if (S.tris.empty()) {
+        throw std::runtime_error("CDT produced no interior faces; polygon may be invalid/self-intersecting.");
+    }
+
+    // Prefix sums
+    S.prefix.resize(S.tris.size());
+    double acc = 0.0;
+    for (size_t i = 0; i < S.tris.size(); ++i) {
+        acc += S.tris[i].area;
+        S.prefix[i] = acc;
+    }
+    S.total_area = acc;
     return S;
 }

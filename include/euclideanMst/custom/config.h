@@ -9,7 +9,8 @@ enum class Shape {
     Ball,       // unit ball B_d(0,1)
     Sphere,     // unit sphere S^{d-1}(0,1)
     Koch,       // Koch snowflake
-    Grassmann   // Grassmann manifold
+    Grassmann,  // Grassmann manifold
+    Systematic, // Systematic fractal
 };
 
 struct MstConfig {
@@ -26,6 +27,9 @@ struct MstConfig {
     
     bool use_triangulation_file = false; 
     std::string triangulation_file;
+
+    int sys_degree = 1;
+    int sys_depth = 5;
 };
 
 static inline Shape parse_shape(const std::string& s) {
@@ -33,8 +37,9 @@ static inline Shape parse_shape(const std::string& s) {
     if (s == "ball")      return Shape::Ball;
     if (s == "sphere")    return Shape::Sphere;
     if (s == "koch")      return Shape::Koch;
+    if (s == "systematic") return Shape::Systematic;
     if (s == "grassmann") return Shape::Grassmann;
-    throw std::runtime_error("Unknown shape: " + s + " (expected cube|ball|sphere|grassmann|koch)");
+    throw std::runtime_error("Unknown shape: " + s + " (expected cube|ball|sphere|grassmann|koch|systematic)");
 }
 
 #endif
